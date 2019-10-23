@@ -15,6 +15,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -31,6 +32,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/configpb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pingcap/pd/pkg/logutil"
@@ -78,6 +80,8 @@ type Server struct {
 	serverLoopCtx    context.Context
 	serverLoopCancel func()
 	serverLoopWg     sync.WaitGroup
+	// for config manager
+	configManager *config.ConfigManager
 
 	member    *member.Member
 	client    *clientv3.Client
@@ -126,7 +130,10 @@ func CreateServer(cfg *config.Config, apiRegister func(*Server) http.Handler) (*
 			pdAPIPrefix: apiRegister(s),
 		}
 	}
-	etcdCfg.ServiceRegister = func(gs *grpc.Server) { pdpb.RegisterPDServer(gs, s) }
+	etcdCfg.ServiceRegister = func(gs *grpc.Server) {
+		pdpb.RegisterPDServer(gs, s)
+		configpb.RegisterConfigServer(gs, s)
+	}
 	s.etcdCfg = etcdCfg
 	if EnableZap {
 		// The etcd master version has removed embed.Config.SetupLogging.
@@ -222,6 +229,7 @@ func (s *Server) startServer() error {
 
 	s.idAllocator = id.NewAllocatorImpl(s.client, s.rootPath, s.member.MemberValue())
 	s.tso = tso.NewTimestampOracle(s.client, s.rootPath, s.member.MemberValue(), s.cfg.TsoSaveInterval.Duration)
+	s.configManager = config.NewConfigManager(s.client, s.rootPath, s.member.MemberValue())
 	kvBase := kv.NewEtcdKVBase(s.client, s.rootPath)
 	path := filepath.Join(s.cfg.DataDir, "region-meta")
 	regionStorage, err := core.NewRegionStorage(path)
@@ -954,6 +962,17 @@ func (s *Server) reloadConfigFromKV() error {
 	if err != nil {
 		return err
 	}
+
+	//save pd config
+	cfg := s.scheduleOpt.Load().Clone()
+	value, err := json.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+	if err = s.configManager.UpdatePDConfig(string(value)); err != nil {
+		return err
+	}
+
 	if s.scheduleOpt.LoadPDServerConfig().UseRegionStorage {
 		s.storage.SwitchToRegionStorage()
 		log.Info("server enable region storage")

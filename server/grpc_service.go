@@ -16,6 +16,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"github.com/pingcap/kvproto/pkg/configpb"
 	"io"
 	"strconv"
 	"sync/atomic"
@@ -278,8 +279,21 @@ func (s *Server) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHeartbea
 		return nil, status.Errorf(codes.Unknown, err.Error())
 	}
 
+	config,err := s.configManager.GetTikvConfig()
+	if err != nil {
+		log.Error(fmt.Sprintf("get tikv config failed with error %v and config %s", err, config), zap.Reflect("reqeust", request))
+	}
+
+	if err == nil && config == "" {
+		if err = s.configManager.UpdateTikvConfig(request.Stats.Config); err != nil {
+			log.Error(fmt.Sprintf("save tikv config failed with error %v and config %s", err, config), zap.Reflect("reqeust", request))
+		}
+	}
+
 	return &pdpb.StoreHeartbeatResponse{
 		Header: s.header(),
+		//empty means do not change it.
+		Config: config,
 	}, nil
 }
 
@@ -781,4 +795,69 @@ func (s *Server) incompatibleVersion(tag string) *pdpb.ResponseHeader {
 		Type:    pdpb.ErrorType_INCOMPATIBLE_VERSION,
 		Message: msg,
 	})
+}
+
+func (s *Server) Get(ctx context.Context, request *configpb.GetRequest) (*configpb.GetResponse, error) {
+	if s.IsClosed() || !s.member.IsLeader() {
+		return nil, errors.WithStack(notLeaderError)
+	}
+	header := request.GetHeader()
+	if header.GetClusterId() != s.clusterID {
+		return nil, status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, header.GetClusterId())
+	}
+
+	cluster := s.GetRaftCluster()
+	if cluster == nil {
+		return &configpb.GetResponse{Header: &configpb.ResponseHeader{Error: &configpb.Error{Type: configpb.ErrorType_FAILED, Message: "cluster is not bootstrapped"}}}, nil
+	}
+
+	var err error
+	var config string
+
+	switch request.Component {
+	case configpb.Component_PD:
+		config,err = s.configManager.GetPDConfig()
+	case configpb.Component_TiKV:
+		config,err = s.configManager.GetTikvConfig()
+	default:
+		err = errors.New("unkown component")
+	}
+
+	if err != nil {
+		return &configpb.GetResponse{Header: &configpb.ResponseHeader{Error: &configpb.Error{Type: configpb.ErrorType_FAILED, Message: fmt.Sprintf("get with error %v", err)}}}, nil
+	}
+
+	return &configpb.GetResponse{Config:config},nil
+}
+
+//TODO update PD config and save it into storage.
+func (s *Server) Update(ctx context.Context, request *configpb.UpdateRequest) (*configpb.UpdateResponse, error) {
+	if s.IsClosed() || !s.member.IsLeader() {
+		return nil, errors.WithStack(notLeaderError)
+	}
+	header := request.GetHeader()
+	if header.GetClusterId() != s.clusterID {
+		return nil, status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, header.GetClusterId())
+	}
+
+	cluster := s.GetRaftCluster()
+	if cluster == nil {
+		return &configpb.UpdateResponse{Header: &configpb.ResponseHeader{Error: &configpb.Error{Type: configpb.ErrorType_FAILED, Message: "cluster is not bootstrapped"}}}, nil
+	}
+
+	var err error
+
+	switch request.Component {
+	case configpb.Component_PD:
+		err = s.configManager.UpdatePDConfig(request.Config)
+	case configpb.Component_TiKV:
+		err = s.configManager.UpdateTikvConfig(request.Config)
+	default:
+		err = errors.New("unkown component")
+	}
+	if err != nil {
+		return &configpb.UpdateResponse{Header: &configpb.ResponseHeader{Error: &configpb.Error{Type: configpb.ErrorType_FAILED, Message: fmt.Sprintf("update with error %v", err)}}}, nil
+	}
+
+	return &configpb.UpdateResponse{}, nil
 }
