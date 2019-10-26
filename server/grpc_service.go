@@ -14,9 +14,10 @@
 package server
 
 import (
+	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
+	"github.com/BurntSushi/toml"
 	"github.com/pingcap/kvproto/pkg/configpb"
 	"github.com/pingcap/pd/server/config"
 	"io"
@@ -807,14 +808,16 @@ func (s *Server) Get(ctx context.Context, request *configpb.GetRequest) (*config
 
 	switch request.Component {
 	case configpb.Component_PD:
-		var data []byte
+		data := bytes.NewBuffer([]byte{})
 		cfg := s.GetConfig()
-		data,err = json.Marshal(config.Config{
+		err = toml.NewEncoder(data).Encode(config.Config{
 			PDServerCfg: cfg.PDServerCfg,
 			Replication: cfg.Replication,
 			Schedule: cfg.Schedule,
 		})
-		c = string(data)
+		if err == nil {
+			c = data.String()
+		}
 	case configpb.Component_TiKV:
 		c,err = s.configManager.GetTikvConfig()
 	default:
