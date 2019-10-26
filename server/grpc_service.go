@@ -15,8 +15,10 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"github.com/pingcap/kvproto/pkg/configpb"
+	"github.com/pingcap/pd/server/config"
 	"io"
 	"strconv"
 	"sync/atomic"
@@ -219,6 +221,7 @@ func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*
 
 	log.Info("put store ok", zap.Stringer("store", store))
 	cluster.OnStoreVersionChange()
+	s.configManager.NewTikvConfigReport(request.Store.Id, request.Config)
 
 	return &pdpb.PutStoreResponse{
 		Header: s.header(),
@@ -279,21 +282,9 @@ func (s *Server) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHeartbea
 		return nil, status.Errorf(codes.Unknown, err.Error())
 	}
 
-	config,err := s.configManager.GetTikvConfig()
-	if err != nil {
-		log.Error(fmt.Sprintf("get tikv config failed with error %v and config %s", err, config), zap.Reflect("reqeust", request))
-	}
-
-	if err == nil && config == "" {
-		if err = s.configManager.UpdateTikvConfig(request.Stats.Config); err != nil {
-			log.Error(fmt.Sprintf("save tikv config failed with error %v and config %s", err, config), zap.Reflect("reqeust", request))
-		}
-	}
-
 	return &pdpb.StoreHeartbeatResponse{
 		Header: s.header(),
-		//empty means do not change it.
-		Config: config,
+		Entry: s.configManager.GetTikvEntries(request.GetStats().GetStoreId()),
 	}, nil
 }
 
@@ -808,26 +799,33 @@ func (s *Server) Get(ctx context.Context, request *configpb.GetRequest) (*config
 
 	cluster := s.GetRaftCluster()
 	if cluster == nil {
-		return &configpb.GetResponse{Header: &configpb.ResponseHeader{Error: &configpb.Error{Type: configpb.ErrorType_FAILED, Message: "cluster is not bootstrapped"}}}, nil
+		return &configpb.GetResponse{Header: &configpb.ResponseHeader{Error: &configpb.Error{Type: configpb.Error_FAILED, Message: "cluster is not bootstrapped"}}}, nil
 	}
 
 	var err error
-	var config string
+	var c string
 
 	switch request.Component {
 	case configpb.Component_PD:
-		config,err = s.configManager.GetPDConfig()
+		var data []byte
+		cfg := s.GetConfig()
+		data,err = json.Marshal(config.Config{
+			PDServerCfg: cfg.PDServerCfg,
+			Replication: cfg.Replication,
+			Schedule: cfg.Schedule,
+		})
+		c = string(data)
 	case configpb.Component_TiKV:
-		config,err = s.configManager.GetTikvConfig()
+		c,err = s.configManager.GetTikvConfig()
 	default:
 		err = errors.New("unkown component")
 	}
 
 	if err != nil {
-		return &configpb.GetResponse{Header: &configpb.ResponseHeader{Error: &configpb.Error{Type: configpb.ErrorType_FAILED, Message: fmt.Sprintf("get with error %v", err)}}}, nil
+		return &configpb.GetResponse{Header: &configpb.ResponseHeader{Error: &configpb.Error{Type: configpb.Error_FAILED, Message: fmt.Sprintf("get with error %v", err)}}}, nil
 	}
 
-	return &configpb.GetResponse{Config:config},nil
+	return &configpb.GetResponse{Config:c},nil
 }
 
 //TODO update PD config and save it into storage.
@@ -842,21 +840,28 @@ func (s *Server) Update(ctx context.Context, request *configpb.UpdateRequest) (*
 
 	cluster := s.GetRaftCluster()
 	if cluster == nil {
-		return &configpb.UpdateResponse{Header: &configpb.ResponseHeader{Error: &configpb.Error{Type: configpb.ErrorType_FAILED, Message: "cluster is not bootstrapped"}}}, nil
+		return &configpb.UpdateResponse{Header: &configpb.ResponseHeader{Error: &configpb.Error{Type: configpb.Error_FAILED, Message: "cluster is not bootstrapped"}}}, nil
 	}
 
 	var err error
 
 	switch request.Component {
 	case configpb.Component_PD:
-		err = s.configManager.UpdatePDConfig(request.Config)
+		cfg := s.GetConfig()
+		err = s.configManager.UpdatePDConfig(request.Entry, cfg)
+		err1 := s.SetScheduleConfig(cfg.Schedule)
+		err2 := s.SetPDServerConfig(cfg.PDServerCfg)
+		err3 := s.SetReplicationConfig(cfg.Replication)
+		if err1 != nil || err2 != nil || err3 != nil {
+			err = errors.New(fmt.Sprintf("save pd config failed with error %v,%v,%v", err1, err2, err3))
+		}
 	case configpb.Component_TiKV:
-		err = s.configManager.UpdateTikvConfig(request.Config)
+		err = s.configManager.UpdateTikvConfig(request.Entry)
 	default:
 		err = errors.New("unkown component")
 	}
 	if err != nil {
-		return &configpb.UpdateResponse{Header: &configpb.ResponseHeader{Error: &configpb.Error{Type: configpb.ErrorType_FAILED, Message: fmt.Sprintf("update with error %v", err)}}}, nil
+		return &configpb.UpdateResponse{Header: &configpb.ResponseHeader{Error: &configpb.Error{Type: configpb.Error_FAILED, Message: fmt.Sprintf("update with error %v", err)}}}, nil
 	}
 
 	return &configpb.UpdateResponse{}, nil

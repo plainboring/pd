@@ -15,7 +15,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -30,9 +29,9 @@ import (
 	"github.com/coreos/go-semver/semver"
 	"github.com/golang/protobuf/proto"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/configpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/kvproto/pkg/configpb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pingcap/pd/pkg/logutil"
@@ -896,6 +895,8 @@ func (s *Server) campaignLeader() {
 		log.Error("failed to reload configuration", zap.Error(err))
 		return
 	}
+	s.configManager.InitConfigManager()
+
 	// Try to create raft cluster.
 	err = s.createRaftCluster()
 	if err != nil {
@@ -960,16 +961,6 @@ func (s *Server) etcdLeaderLoop() {
 func (s *Server) reloadConfigFromKV() error {
 	err := s.scheduleOpt.Reload(s.storage)
 	if err != nil {
-		return err
-	}
-
-	//save pd config
-	cfg := s.scheduleOpt.Load().Clone()
-	value, err := json.Marshal(cfg)
-	if err != nil {
-		return err
-	}
-	if err = s.configManager.UpdatePDConfig(string(value)); err != nil {
 		return err
 	}
 
