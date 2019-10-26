@@ -75,6 +75,7 @@ func (c *ConfigManager) NewTikvConfigReport(store_id uint64, config string)  {
 		raft_store = cfg
 	}
 
+	log.Info(fmt.Sprintf("record %v tikv config %+v", store_id, raft_store))
 	c.mu.Lock()
 	c.tikvConfigs[store_id] = &tikvConfig{
 		store_id: store_id,
@@ -139,8 +140,7 @@ func (c *ConfigManager) SaveTikvConfig(store_id uint64, config string) error {
 	txn := kv.NewSlowLogTxn(c.client).If(append([]clientv3.Cmp{}, clientv3.Compare(clientv3.Value(leaderPath), "=", c.member))...)
 
 	configPath := path.Join(c.rootPath, "tikv", strconv.FormatUint(store_id, 10))
-	store_path := path.Join(configPath, strconv.FormatUint(store_id, 10))
-	resp, err := txn.Then(clientv3.OpPut(store_path, config)).Commit()
+	resp, err := txn.Then(clientv3.OpPut(configPath, config)).Commit()
 	if err != nil {
 		return errors.WithStack(err)
 	}
