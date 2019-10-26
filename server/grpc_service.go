@@ -14,9 +14,10 @@
 package server
 
 import (
+	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
+	"github.com/BurntSushi/toml"
 	"github.com/pingcap/kvproto/pkg/configpb"
 	"github.com/pingcap/pd/server/config"
 	"io"
@@ -282,9 +283,14 @@ func (s *Server) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHeartbea
 		return nil, status.Errorf(codes.Unknown, err.Error())
 	}
 
+	l := s.configManager.GetTikvEntries(request.GetStats().GetStoreId())
+	if len(l) != 0 {
+		log.Info(fmt.Sprintf("send %d configs to tikv %v. entries : %+v", len(l), request.GetStats().GetStoreId(), l))
+	}
+
 	return &pdpb.StoreHeartbeatResponse{
 		Header: s.header(),
-		Entry: s.configManager.GetTikvEntries(request.GetStats().GetStoreId()),
+		Entry: l,
 	}, nil
 }
 
@@ -792,10 +798,10 @@ func (s *Server) Get(ctx context.Context, request *configpb.GetRequest) (*config
 	if s.IsClosed() || !s.member.IsLeader() {
 		return nil, errors.WithStack(notLeaderError)
 	}
-	header := request.GetHeader()
-	if header.GetClusterId() != s.clusterID {
-		return nil, status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, header.GetClusterId())
-	}
+	//header := request.GetHeader()
+	//if header.GetClusterId() != s.clusterID {
+	//	return nil, status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, header.GetClusterId())
+	//}
 
 	cluster := s.GetRaftCluster()
 	if cluster == nil {
@@ -807,14 +813,16 @@ func (s *Server) Get(ctx context.Context, request *configpb.GetRequest) (*config
 
 	switch request.Component {
 	case configpb.Component_PD:
-		var data []byte
+		data := bytes.NewBuffer([]byte{})
 		cfg := s.GetConfig()
-		data,err = json.Marshal(config.Config{
+		err = toml.NewEncoder(data).Encode(config.Config{
 			PDServerCfg: cfg.PDServerCfg,
 			Replication: cfg.Replication,
 			Schedule: cfg.Schedule,
 		})
-		c = string(data)
+		if err == nil {
+			c = data.String()
+		}
 	case configpb.Component_TiKV:
 		c,err = s.configManager.GetTikvConfig()
 	default:
@@ -833,10 +841,10 @@ func (s *Server) Update(ctx context.Context, request *configpb.UpdateRequest) (*
 	if s.IsClosed() || !s.member.IsLeader() {
 		return nil, errors.WithStack(notLeaderError)
 	}
-	header := request.GetHeader()
-	if header.GetClusterId() != s.clusterID {
-		return nil, status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, header.GetClusterId())
-	}
+	//header := request.GetHeader()
+	//if header.GetClusterId() != s.clusterID {
+	//	return nil, status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, header.GetClusterId())
+	//}
 
 	cluster := s.GetRaftCluster()
 	if cluster == nil {
@@ -855,8 +863,10 @@ func (s *Server) Update(ctx context.Context, request *configpb.UpdateRequest) (*
 		if err1 != nil || err2 != nil || err3 != nil {
 			err = errors.New(fmt.Sprintf("save pd config failed with error %v,%v,%v", err1, err2, err3))
 		}
+		log.Info(fmt.Sprintf("receive an update of pd with detail %+v", request.Entry))
 	case configpb.Component_TiKV:
 		err = s.configManager.UpdateTikvConfig(request.Entry)
+		log.Info(fmt.Sprintf("receive an update of tikv with detail %+v", request.Entry))
 	default:
 		err = errors.New("unkown component")
 	}
