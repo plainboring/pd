@@ -51,6 +51,8 @@ func TestTIKVReload(t *testing.T)  {
 
 func TestTikvWorkLoad(t *testing.T) {
 	var store_id uint64 = 1
+	var other_store_id uint64 = 2
+
 	manager := ConfigManager{
 		tikvConfigs: make(map[uint64]*tikvConfig),
 		baseKV: kv.NewMemoryKV(),
@@ -63,13 +65,17 @@ func TestTikvWorkLoad(t *testing.T) {
 	if err := toml.NewEncoder(buf).Encode(initConfig); err != nil {
 		t.Fatal(err)
 	}
+	//t.Log(buf.String())
 	manager.NewTikvConfigReport(store_id, buf.String())
+	manager.NewTikvConfigReport(other_store_id, buf.String())
 
 	//tidb get tikv config
-	str,err := manager.GetTikvConfig()
+	str,err := manager.GetTikvConfig(store_id)
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Log(str)
+
 	newCfg := cfgclient.Config{}
 	if _,err := toml.Decode(str, &newCfg); err != nil {
 		t.Fatal(err)
@@ -86,7 +92,7 @@ func TestTikvWorkLoad(t *testing.T) {
 		Value: "100",
 	}
 
-	if err := manager.UpdateTikvConfig(entry); err != nil {
+	if err := manager.UpdateTikvConfig(store_id, entry); err != nil {
 		t.Fatal(err)
 	}
 	//if manager.tikvConfigs[store_id].config.Raftstore.RaftLogGCCountLimit != 100 {
@@ -101,6 +107,10 @@ func TestTikvWorkLoad(t *testing.T) {
 	if entries[0].Name != entry.Name || entries[0].Value != entry.Value {
 		t.Fatal(entries[0], entry)
 	}
+	entries = manager.GetTikvEntries(other_store_id)
+	if len(entries) != 0 {
+		t.Fatal(entries)
+	}
 
 	//tikv heartbear and receive nothing
 	entries = manager.GetTikvEntries(store_id)
@@ -109,7 +119,7 @@ func TestTikvWorkLoad(t *testing.T) {
 	}
 
 	//tidb get tikv config
-	str,err = manager.GetTikvConfig()
+	str,err = manager.GetTikvConfig(store_id)
 	if err != nil {
 		t.Fatal(err)
 	}
