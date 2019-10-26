@@ -65,7 +65,7 @@ func (c *ConfigManager) NewTikvConfigReport(store_id uint64, config string)  {
 	if err != nil {
 		panic(err)
 	}
-
+	log.Info(fmt.Sprintf("%+v", raft_store))
 	cfg := c.GetLatestTikvConfig(store_id)
 	if cfg == nil {
 		if err := c.SaveTikvConfigIfNotExist(store_id, config); err != nil {
@@ -74,7 +74,7 @@ func (c *ConfigManager) NewTikvConfigReport(store_id uint64, config string)  {
 	} else {
 		raft_store = cfg
 	}
-
+	//log.Info(config)
 	log.Info(fmt.Sprintf("record %v tikv config %+v", store_id, raft_store))
 	c.mu.Lock()
 	c.tikvConfigs[store_id] = &tikvConfig{
@@ -87,7 +87,7 @@ func (c *ConfigManager) NewTikvConfigReport(store_id uint64, config string)  {
 func (c *ConfigManager) GetLatestTikvConfig(store_id uint64) *cfgclient.Config {
 	configPath := path.Join(c.rootPath, "tikv", strconv.FormatUint(store_id, 10))
 	cfg,err := c.baseKV.Load(configPath)
-	if err != nil {
+	if err != nil || cfg == "" {
 		return nil
 	}
 
@@ -100,7 +100,9 @@ func (c *ConfigManager) GetLatestTikvConfig(store_id uint64) *cfgclient.Config {
 
 func (c *ConfigManager) ApplyNewConfigForTikv(store_id uint64, entry  *configpb.ConfigEntry) {
 	latest_config := c.GetLatestTikvConfig(store_id)
-
+	if latest_config == nil {
+		return
+	}
 	switch entry.Subsystem[0] {
 	case "server":
 		c.DecodeTikvServerConfig(latest_config, entry)
@@ -148,7 +150,8 @@ func (c *ConfigManager) SaveTikvConfig(store_id uint64, config string) error {
 	if !resp.Succeeded {
 		return errors.New("save config failed, maybe we lost leader")
 	}
-	return nil
+	return c.baseKV.Save(configPath, config)
+	//return nil
 }
 
 func (c *ConfigManager) GetTikvEntries(store_id uint64) []*configpb.ConfigEntry {

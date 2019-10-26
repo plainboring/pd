@@ -282,13 +282,10 @@ func (s *Server) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHeartbea
 		return nil, status.Errorf(codes.Unknown, err.Error())
 	}
 
-	cfg := s.configManager.GetLatestTikvConfig(request.GetStats().GetStoreId())
 	data := bytes.NewBuffer([]byte{})
-	err = toml.NewEncoder(data).Encode(cfg)
-	//l := s.configManager.GetTikvEntries(request.GetStats().GetStoreId())
-	//if len(l) != 0 {
-	//	log.Info(fmt.Sprintf("send %d configs to tikv %v. entries : %+v", len(l), request.GetStats().GetStoreId(), l))
-	//}
+	if cfg := s.configManager.GetLatestTikvConfig(request.GetStats().GetStoreId()); cfg != nil {
+		err = toml.NewEncoder(data).Encode(cfg)
+	}
 
 	return &pdpb.StoreHeartbeatResponse{
 		Header: s.header(),
@@ -829,9 +826,11 @@ func (s *Server) Get(ctx context.Context, request *configpb.GetRequest) (*config
 			c = data.String()
 		}
 	case configpb.Component_TiKV:
-		cfg := s.configManager.GetLatestTikvConfig(request.StoreId)
 		data := bytes.NewBuffer([]byte{})
-		err = toml.NewEncoder(data).Encode(cfg)
+		if cfg := s.configManager.GetLatestTikvConfig(request.StoreId); cfg != nil {
+			err = toml.NewEncoder(data).Encode(cfg)
+		}
+
 		if err == nil {
 			c = data.String()
 		}
