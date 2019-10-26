@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"github.com/BurntSushi/toml"
 	"github.com/pingcap/kvproto/pkg/configpb"
-	"github.com/pingcap/pd/server/config"
 	"io"
 	"strconv"
 	"sync/atomic"
@@ -815,11 +814,8 @@ func (s *Server) Get(ctx context.Context, request *configpb.GetRequest) (*config
 	case configpb.Component_PD:
 		data := bytes.NewBuffer([]byte{})
 		cfg := s.GetConfig()
-		err = toml.NewEncoder(data).Encode(config.Config{
-			PDServerCfg: cfg.PDServerCfg,
-			Replication: cfg.Replication,
-			Schedule: cfg.Schedule,
-		})
+		cfg.Schedule.Schedulers = nil
+		err = toml.NewEncoder(data).Encode(cfg)
 		log.Info(fmt.Sprintf("should send config %+v, and data %s", cfg, data.String()))
 		if err == nil {
 			c = data.String()
@@ -867,7 +863,7 @@ func (s *Server) Update(ctx context.Context, request *configpb.UpdateRequest) (*
 		}
 		log.Info(fmt.Sprintf("receive an update of pd with detail %+v", request.Entry))
 	case configpb.Component_TiKV:
-		err = s.configManager.UpdateTikvConfig(request.Entry)
+		err = s.configManager.UpdateTikvConfig(request.StoreId, request.Entry)
 		log.Info(fmt.Sprintf("receive an update of tikv with detail %+v", request.Entry))
 	default:
 		err = errors.New("unkown component")

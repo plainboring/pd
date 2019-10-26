@@ -41,4 +41,4 @@ require (
 
 )
 
-replace github.com/pingcap/kvproto => github.com/plainboring/kvproto v0.0.0-20191026023322-e80cd74509d2
+replace github.com/pingcap/kvproto => github.com/plainboring/kvproto v0.0.0-20191026121615-cbcd22a49316

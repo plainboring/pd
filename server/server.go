@@ -895,7 +895,7 @@ func (s *Server) campaignLeader() {
 		log.Error("failed to reload configuration", zap.Error(err))
 		return
 	}
-	s.configManager.InitConfigManager()
+	//s.configManager.InitConfigManager()
 
 	// Try to create raft cluster.
 	err = s.createRaftCluster()
