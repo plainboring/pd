@@ -803,14 +803,14 @@ func (s *Server) Get(ctx context.Context, request *configpb.GetRequest) (*config
 	//	return nil, status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, header.GetClusterId())
 	//}
 
-	cluster := s.GetRaftCluster()
-	if cluster == nil {
-		return &configpb.GetResponse{Header: &configpb.ResponseHeader{Error: &configpb.Error{Type: configpb.Error_FAILED, Message: "cluster is not bootstrapped"}}}, nil
-	}
+	//cluster := s.GetRaftCluster()
+	//if cluster == nil {
+	//	return &configpb.GetResponse{Header: &configpb.ResponseHeader{Error: &configpb.Error{Type: configpb.Error_FAILED, Message: "cluster is not bootstrapped"}}}, nil
+	//}
 
 	var err error
 	var c string
-
+	log.Info("receive log1")
 	switch request.Component {
 	case configpb.Component_PD:
 		data := bytes.NewBuffer([]byte{})
@@ -820,11 +820,13 @@ func (s *Server) Get(ctx context.Context, request *configpb.GetRequest) (*config
 			Replication: cfg.Replication,
 			Schedule: cfg.Schedule,
 		})
+		log.Info(fmt.Sprintf("should send config %+v, and data %s", cfg, data.String()))
 		if err == nil {
 			c = data.String()
 		}
 	case configpb.Component_TiKV:
-		c,err = s.configManager.GetTikvConfig()
+		c,err = s.configManager.GetTikvConfig(request.StoreId)
+		log.Info(fmt.Sprintf("should send config %s", c))
 	default:
 		err = errors.New("unkown component")
 	}
@@ -846,10 +848,10 @@ func (s *Server) Update(ctx context.Context, request *configpb.UpdateRequest) (*
 	//	return nil, status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, header.GetClusterId())
 	//}
 
-	cluster := s.GetRaftCluster()
-	if cluster == nil {
-		return &configpb.UpdateResponse{Header: &configpb.ResponseHeader{Error: &configpb.Error{Type: configpb.Error_FAILED, Message: "cluster is not bootstrapped"}}}, nil
-	}
+	//cluster := s.GetRaftCluster()
+	//if cluster == nil {
+	//	return &configpb.UpdateResponse{Header: &configpb.ResponseHeader{Error: &configpb.Error{Type: configpb.Error_FAILED, Message: "cluster is not bootstrapped"}}}, nil
+	//}
 
 	var err error
 

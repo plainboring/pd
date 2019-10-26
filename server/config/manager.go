@@ -100,20 +100,21 @@ func (c *ConfigManager) GetTikvEntries(store_id uint64) []*configpb.ConfigEntry 
 }
 
 //TODO get config by store_id
-func (c *ConfigManager) GetTikvConfig() (string, error) {
+func (c *ConfigManager) GetTikvConfig(store_id uint64) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	var cfg *cfgclient.Config
-	for _,t_cfg := range c.tikvConfigs {
-		cfg = t_cfg.config
-	}
-	if cfg == nil {
+	//var cfg *cfgclient.Config
+	//for _,t_cfg := range c.tikvConfigs {
+	//	cfg = t_cfg.config
+	//}
+	cfg,ok := c.tikvConfigs[store_id]
+	if !ok {
 		return "",errors.New("there are no tikv in memory")
 	}
 
 	tikv_config := bytes.NewBuffer([]byte{})
-	err := toml.NewEncoder(tikv_config).Encode(cfg)
+	err := toml.NewEncoder(tikv_config).Encode(cfg.config)
 	if err != nil {
 		return "",err
 	}
