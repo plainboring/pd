@@ -22,9 +22,6 @@ type ConfigManager struct {
 	rootPath string
 	member   string
 
-	//index_mu sync.Mutex
-	//tikvEntryIndex map[uint64]
-
 	client   *clientv3.Client
 	baseKV kv.Base
 	tikvConfigs map[uint64]*tikvConfig
@@ -63,18 +60,95 @@ func NewConfigManager(client *clientv3.Client, rootPath string, member string) *
 //}
 //
 func (c *ConfigManager) NewTikvConfigReport(store_id uint64, config string)  {
-	c.mu.Lock()
-	raft_store := cfgclient.Config{}
-	_,err := toml.Decode(config, &raft_store)
+	raft_store := &cfgclient.Config{}
+	_,err := toml.Decode(config, raft_store)
 	if err != nil {
 		panic(err)
 	}
+
+	cfg := c.GetLatestTikvConfig(store_id)
+	if cfg == nil {
+		if err := c.SaveTikvConfigIfNotExist(store_id, config); err != nil {
+			log.Error(err.Error())
+		}
+	} else {
+		raft_store = cfg
+	}
+
+	c.mu.Lock()
 	c.tikvConfigs[store_id] = &tikvConfig{
 		store_id: store_id,
-		config: &raft_store,
-		appliedIndex: 0,
+		config: raft_store,
 	}
 	c.mu.Unlock()
+}
+
+func (c *ConfigManager) GetLatestTikvConfig(store_id uint64) *cfgclient.Config {
+	configPath := path.Join(c.rootPath, "tikv", strconv.FormatUint(store_id, 10))
+	cfg,err := c.baseKV.Load(configPath)
+	if err != nil {
+		return nil
+	}
+
+	raft_store := &cfgclient.Config{}
+	if _,err = toml.Decode(cfg, raft_store); err != nil {
+		panic(err)
+	}
+	return raft_store
+}
+
+func (c *ConfigManager) ApplyNewConfigForTikv(store_id uint64, entry  *configpb.ConfigEntry) {
+	latest_config := c.GetLatestTikvConfig(store_id)
+
+	switch entry.Subsystem[0] {
+	case "server":
+		c.DecodeTikvServerConfig(latest_config, entry)
+	case "storage":
+		c.DecodeTikvStorageConfig(latest_config, entry)
+	case "raftstore":
+		c.DecodeTikvRaftStorageConfig(latest_config, entry)
+	case "storage,block-cache":
+		c.DecodeTikvStorageBlockCacheConfig(latest_config, entry)
+	}
+
+	buf := bytes.NewBuffer([]byte{})
+	if err := toml.NewEncoder(buf).Encode(latest_config); err != nil {
+		log.Error(err.Error())
+	}
+
+	if err := c.SaveTikvConfig(store_id, buf.String()); err != nil {
+		log.Error(err.Error())
+	}
+}
+
+func (c *ConfigManager) SaveTikvConfigIfNotExist(store_id uint64, config string) error {
+	configPath := path.Join(c.rootPath, "tikv", strconv.FormatUint(store_id, 10))
+	cfg,err := c.baseKV.Load(configPath)
+	if err != nil {
+		return err
+	}
+	if cfg != "" {
+		return nil
+	}
+
+	return c.SaveTikvConfig(store_id, config)
+}
+
+func (c *ConfigManager) SaveTikvConfig(store_id uint64, config string) error {
+	leaderPath := path.Join(c.rootPath, "leader")
+	txn := kv.NewSlowLogTxn(c.client).If(append([]clientv3.Cmp{}, clientv3.Compare(clientv3.Value(leaderPath), "=", c.member))...)
+
+	configPath := path.Join(c.rootPath, "tikv", strconv.FormatUint(store_id, 10))
+	store_path := path.Join(configPath, strconv.FormatUint(store_id, 10))
+	resp, err := txn.Then(clientv3.OpPut(store_path, config)).Commit()
+	if err != nil {
+		return errors.WithStack(err)
+	}
+
+	if !resp.Succeeded {
+		return errors.New("save config failed, maybe we lost leader")
+	}
+	return nil
 }
 
 func (c *ConfigManager) GetTikvEntries(store_id uint64) []*configpb.ConfigEntry {
@@ -100,7 +174,6 @@ func (c *ConfigManager) GetTikvEntries(store_id uint64) []*configpb.ConfigEntry 
 	return changed
 }
 
-//TODO get config by store_id
 func (c *ConfigManager) GetTikvConfig(store_id uint64) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -292,6 +365,237 @@ func (c *ConfigManager) UpdateTikvConfig(store_id uint64, entry *configpb.Config
 	}
 
 	return nil
+}
+
+func (c *ConfigManager) DecodeTikvServerConfig(cfg *cfgclient.Config, entry *configpb.ConfigEntry)  {
+	num_value,num_err := strconv.ParseInt(entry.Value, 10, 64)
+	bool_value,bool_err := strconv.ParseBool(entry.Value)
+	switch entry.Name {
+	case "grpc-concurrency":
+		if num_err == nil {
+			cfg.Server.GrpcConcurrency = num_value
+		}
+	case "grpc-concurrent-stream":
+		if num_err == nil {
+			cfg.Server.GrpcConcurrentStream = num_value
+		}
+	case "grpc-raft-conn-num":
+		if num_err == nil {
+			cfg.Server.GrpcRaftConnNum = num_value
+		}
+	case "concurrent-send-snap-limit":
+		if num_err == nil {
+			cfg.Server.ConcurrentSendSnapLimit = num_value
+		}
+	case "concurrent-recv-snap-limit":
+		if num_err == nil {
+			cfg.Server.ConcurrentRecvSnapLimit = num_value
+		}
+	case "end-point-recursion-limit":
+		if num_err == nil {
+			cfg.Server.EndPointRecursionLimit = num_value
+		}
+	case "end-point-stream-channel-size":
+		if num_err == nil {
+			cfg.Server.EndPointStreamChannelSize = num_value
+		}
+	case "end-point-batch-row-limit":
+		if num_err == nil {
+			cfg.Server.EndPointBatchRowLimit = num_value
+		}
+	case "end-point-stream-batch-row-limit":
+		if num_err == nil {
+			cfg.Server.EndPointStreamBatchRowLimit = num_value
+		}
+	case "stats-concurrency":
+		if num_err == nil {
+			cfg.Server.StatsConcurrency = num_value
+		}
+	case "heavy-load-threshold":
+		if num_err == nil {
+			cfg.Server.HeavyLoadThreshold = num_value
+		}
+	case "end-point-enable-batch-if-possible":
+		if bool_err == nil {
+			cfg.Server.EndPointEnableBatchIfPossible = bool_value
+		}
+	case "labels":
+		//skip
+	default:
+		buf := bytes.NewBuffer([]byte{})
+		if err := toml.NewEncoder(buf).Encode(map[string]string{entry.Name: entry.Value}); err != nil {
+			panic(err)
+		}
+		fmt.Println(buf.String(), buf.Len())
+		if err := toml.Unmarshal(buf.Bytes(), &cfg.Server); err != nil {
+			panic(err)
+		}
+	}
+}
+
+func (c *ConfigManager) DecodeTikvStorageConfig(cfg *cfgclient.Config, entry *configpb.ConfigEntry)  {
+	num_value,num_err := strconv.ParseInt(entry.Value, 10, 64)
+	switch entry.Name {
+	case "max-key-size":
+		if num_err == nil {
+			cfg.Storage.MaxKeySize = num_value
+		}
+	case "scheduler-notify-capacity":
+		if num_err == nil {
+			cfg.Storage.SchedulerNotifyCapacity = num_value
+		}
+	case "scheduler-concurrency":
+		if num_err == nil {
+			cfg.Storage.SchedulerConcurrency = num_value
+		}
+	case "scheduler-worker-pool-size":
+		if num_err == nil {
+			cfg.Storage.SchedulerWorkerPoolSize = num_value
+		}
+	default:
+		buf := bytes.NewBuffer([]byte{})
+		if err := toml.NewEncoder(buf).Encode(map[string]string{entry.Name: entry.Value}); err != nil {
+			panic(err)
+		}
+		fmt.Println(buf.String(), buf.Len())
+		if err := toml.Unmarshal(buf.Bytes(), &cfg.Storage); err != nil {
+			panic(err)
+		}
+	}
+}
+
+func (c *ConfigManager)  DecodeTikvStorageBlockCacheConfig(cfg *cfgclient.Config, entry *configpb.ConfigEntry) {
+	num_value,num_err := strconv.ParseInt(entry.Value, 10, 64)
+	float64_value,float64_err := strconv.ParseFloat(entry.Value, 64)
+	bool_value,bool_err := strconv.ParseBool(entry.Value)
+
+	switch entry.Name {
+	case "shared":
+		if bool_err == nil {
+			cfg.Storage.BlockCache.Shared = bool_value
+		}
+	case "strict-capacity-limit":
+		if bool_err == nil {
+			cfg.Storage.BlockCache.StrictCapacityLimit = bool_value
+		}
+	//int64
+	case "num-shard-bits":
+		if num_err == nil {
+			cfg.Storage.BlockCache.NumShardBits = num_value
+		}
+	//float64
+	case "high-pri-pool-ratio":
+		if float64_err == nil {
+			cfg.Storage.BlockCache.HighPriPoolRatio = float64_value
+		}
+	default:
+		buf := bytes.NewBuffer([]byte{})
+		if err := toml.NewEncoder(buf).Encode(map[string]string{entry.Name: entry.Value}); err != nil {
+			panic(err)
+		}
+		fmt.Println(buf.String(), buf.Len())
+		if err := toml.Unmarshal(buf.Bytes(), &cfg.Storage.BlockCache); err != nil {
+			panic(err)
+		}
+	}
+
+}
+
+func (c *ConfigManager) DecodeTikvRaftStorageConfig(cfg *cfgclient.Config, entry *configpb.ConfigEntry)  {
+	num_value,num_err := strconv.ParseInt(entry.Value, 10, 64)
+	bool_value,bool_err := strconv.ParseBool(entry.Value)
+
+	switch entry.Name {
+	case "raft-heartbeat-ticks":
+		if num_err == nil {
+			cfg.Raftstore.RaftHeartbeatTicks = num_value
+		}
+	case "raft-election-timeout-ticks":
+		if num_err == nil {
+			cfg.Raftstore.RaftElectionTimeoutTicks = num_value
+		}
+	case "raft-log-gc-threshold":
+		if num_err == nil {
+			cfg.Raftstore.RaftLogGCThreshold = num_value
+		}
+	case "raft-log-gc-count-limit":
+		if num_err == nil {
+			cfg.Raftstore.RaftLogGCCountLimit = num_value
+		}
+	case "region-compact-check-step":
+		if num_err == nil {
+			cfg.Raftstore.RegionCompactCheckStep = num_value
+		}
+	case "region-compact-min-tombstones":
+		if num_err == nil {
+			cfg.Raftstore.RegionCompactMinTombstones = num_value
+		}
+	case "region-compact-tombstones-percent":
+		if num_err == nil {
+			cfg.Raftstore.RegionCompactTombstonesPercent = num_value
+		}
+	case "notify-capacity":
+		if num_err == nil {
+			cfg.Raftstore.NotifyCapacity = num_value
+		}
+	case "messages-per-tick":
+		if num_err == nil {
+			cfg.Raftstore.MessagesPerTick = num_value
+		}
+	case "leader-transfer-max-log-lag":
+		if num_err == nil {
+			cfg.Raftstore.LeaderTransferMaxLogLag = num_value
+		}
+	case "merge-max-log-gap":
+		if num_err == nil {
+			cfg.Raftstore.MergeMaxLogGap = num_value
+		}
+	case "apply-max-batch-size":
+		if num_err == nil {
+			cfg.Raftstore.ApplyMaxBatchSize = num_value
+		}
+	case "apply-pool-size":
+		if num_err == nil {
+			cfg.Raftstore.ApplyPoolSize = num_value
+		}
+	case "store-max-batch-size":
+		if num_err == nil {
+			cfg.Raftstore.StoreMaxBatchSize = num_value
+		}
+	case "store-pool-size":
+		if num_err == nil {
+			cfg.Raftstore.StorePoolSize = num_value
+		}
+	case "sync-log":
+		if bool_err == nil {
+			cfg.Raftstore.SyncLog = bool_value
+		}
+	case "right-derive-when-split":
+		if bool_err == nil {
+			cfg.Raftstore.RightDeriveWhenSplit = bool_value
+		}
+	case "allow-remove-leader":
+		if bool_err == nil {
+			cfg.Raftstore.AllowRemoveLeader = bool_value
+		}
+	case "use-delete-range":
+		if bool_err == nil {
+			cfg.Raftstore.UseDeleteRange = bool_value
+		}
+	case "hibernate-regions":
+		if bool_err == nil {
+			cfg.Raftstore.HibernateRegions = bool_value
+		}
+	default:
+		buf := bytes.NewBuffer([]byte{})
+		if err := toml.NewEncoder(buf).Encode(map[string]string{entry.Name: entry.Value}); err != nil {
+			panic(err)
+		}
+		fmt.Println(buf.String(), buf.Len())
+		if err := toml.Unmarshal(buf.Bytes(), &cfg.Raftstore); err != nil {
+			panic(err)
+		}
+	}
 }
 
 func (c *ConfigManager) applyChange(store_id uint64, entry []*configpb.ConfigEntry) {

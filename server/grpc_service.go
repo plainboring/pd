@@ -282,14 +282,17 @@ func (s *Server) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHeartbea
 		return nil, status.Errorf(codes.Unknown, err.Error())
 	}
 
-	l := s.configManager.GetTikvEntries(request.GetStats().GetStoreId())
-	if len(l) != 0 {
-		log.Info(fmt.Sprintf("send %d configs to tikv %v. entries : %+v", len(l), request.GetStats().GetStoreId(), l))
-	}
+	cfg := s.configManager.GetLatestTikvConfig(request.GetStats().GetStoreId())
+	data := bytes.NewBuffer([]byte{})
+	err = toml.NewEncoder(data).Encode(cfg)
+	//l := s.configManager.GetTikvEntries(request.GetStats().GetStoreId())
+	//if len(l) != 0 {
+	//	log.Info(fmt.Sprintf("send %d configs to tikv %v. entries : %+v", len(l), request.GetStats().GetStoreId(), l))
+	//}
 
 	return &pdpb.StoreHeartbeatResponse{
 		Header: s.header(),
-		Entry: l,
+		Config: data.String(),
 	}, nil
 }
 
@@ -821,7 +824,12 @@ func (s *Server) Get(ctx context.Context, request *configpb.GetRequest) (*config
 			c = data.String()
 		}
 	case configpb.Component_TiKV:
-		c,err = s.configManager.GetTikvConfig(request.StoreId)
+		cfg := s.configManager.GetLatestTikvConfig(request.StoreId)
+		data := bytes.NewBuffer([]byte{})
+		err = toml.NewEncoder(data).Encode(cfg)
+		if err == nil {
+			c = data.String()
+		}
 		log.Info(fmt.Sprintf("should send config %s", c))
 	default:
 		err = errors.New("unkown component")
@@ -863,7 +871,8 @@ func (s *Server) Update(ctx context.Context, request *configpb.UpdateRequest) (*
 		}
 		log.Info(fmt.Sprintf("receive an update of pd with detail %+v", request.Entry))
 	case configpb.Component_TiKV:
-		err = s.configManager.UpdateTikvConfig(request.StoreId, request.Entry)
+		s.configManager.ApplyNewConfigForTikv(request.StoreId, request.Entry)
+		//err = s.configManager.UpdateTikvConfig(request.StoreId, request.Entry)
 		log.Info(fmt.Sprintf("receive an update of tikv with detail %+v", request.Entry))
 	default:
 		err = errors.New("unkown component")
