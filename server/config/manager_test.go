@@ -137,17 +137,26 @@ func TestNewTikvUpdate(t *testing.T)  {
 		tikvConfigs: make(map[uint64]*tikvConfig),
 		baseKV: kv.NewMemoryKV(),
 	}
+
 	var store_id uint64 = 1
 	initConfig := cfgclient.Config{}
-	initConfig.Raftstore.RaftLogGCCountLimit = 10
+	initConfig.Raftstore.RaftLogGCCountLimit = 100
 	buf := bytes.NewBuffer([]byte{})
 	if err := toml.NewEncoder(buf).Encode(initConfig); err != nil {
 		t.Fatal(err)
 	}
 
 	manager.NewTikvConfigReport(store_id, buf.String())
+
 	cfg := manager.GetLatestTikvConfig(store_id)
-	if cfg.Raftstore.RaftLogGCCountLimit != 10 {
+	if cfg.Raftstore.RaftLogGCCountLimit != 100 {
 		t.Fatal(cfg.Raftstore.RaftLogGCCountLimit)
 	}
+
+	manager.ApplyNewConfigForTikv(store_id, &configpb.ConfigEntry{Subsystem:[]string{"raftstore"}, Name:"store-pool-size",Value:"100"})
+	cfg = manager.GetLatestTikvConfig(store_id)
+	if cfg.Raftstore.StorePoolSize != 100 {
+		t.Fatal(cfg.Raftstore.RaftLogGCCountLimit)
+	}
+
 }
