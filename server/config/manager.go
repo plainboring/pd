@@ -150,8 +150,8 @@ func (c *ConfigManager) SaveTikvConfig(store_id uint64, config string) error {
 	if !resp.Succeeded {
 		return errors.New("save config failed, maybe we lost leader")
 	}
-	return c.baseKV.Save(configPath, config)
-	//return nil
+	//return c.baseKV.Save(configPath, config)
+	return nil
 }
 
 func (c *ConfigManager) GetTikvEntries(store_id uint64) []*configpb.ConfigEntry {
