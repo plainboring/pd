@@ -19,11 +19,11 @@ import (
 	"fmt"
 	"github.com/BurntSushi/toml"
 	"github.com/pingcap/kvproto/pkg/configpb"
+	"github.com/pingcap/pd/server/config"
 	"io"
 	"strconv"
 	"sync/atomic"
 	"time"
-
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -817,8 +817,13 @@ func (s *Server) Get(ctx context.Context, request *configpb.GetRequest) (*config
 	case configpb.Component_PD:
 		data := bytes.NewBuffer([]byte{})
 		cfg := s.GetConfig()
-		cfg.Schedule.Schedulers = nil
-		err = toml.NewEncoder(data).Encode(cfg)
+		new_cfg := config.Config{
+			Schedule: cfg.Schedule,
+			Replication: cfg.Replication,
+			PDServerCfg: cfg.PDServerCfg,
+		}
+
+		err = toml.NewEncoder(data).Encode(new_cfg)
 		log.Info(fmt.Sprintf("should send config %+v, and data %s", cfg, data.String()))
 		if err == nil {
 			c = data.String()
