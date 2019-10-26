@@ -24,7 +24,7 @@ type ConfigManager struct {
 
 	tikvEntryIndex int32
 	client   *clientv3.Client
-
+	baseKV kv.Base
 	tikvConfigs map[uint64]*tikvConfig
 
 	option *ScheduleOption
@@ -43,6 +43,7 @@ func NewConfigManager(client *clientv3.Client, rootPath string, member string) *
 		client:   client,
 		member:   member,
 		tikvConfigs: make(map[uint64]*tikvConfig),
+		baseKV: kv.NewEtcdKVBase(client, rootPath),
 	}
 
 	return cfg
@@ -88,9 +89,9 @@ func (c *ConfigManager) GetTikvEntries(store_id uint64) []*configpb.ConfigEntry 
 	}
 
 	if cfg.appliedIndex < c.tikvEntryIndex {
-		cfg.appliedIndex = c.tikvEntryIndex
 		changed = entries[cfg.appliedIndex:]
 		c.applyChange(store_id, changed)
+		cfg.appliedIndex = c.tikvEntryIndex
 	}
 	c.mu.Unlock()
 
@@ -110,13 +111,13 @@ func (c *ConfigManager) GetTikvConfig() (string, error) {
 		return "",errors.New("there are no tikv in memory")
 	}
 
-	tikv_config := []byte{}
-	err := toml.NewEncoder(bytes.NewBuffer(tikv_config)).Encode(cfg)
+	tikv_config := bytes.NewBuffer([]byte{})
+	err := toml.NewEncoder(tikv_config).Encode(cfg)
 	if err != nil {
 		return "",err
 	}
 
-	return string(tikv_config),nil
+	return tikv_config.String(),nil
 }
 
 func (c *ConfigManager) UpdatePDConfig(entry *configpb.ConfigEntry, cfg *Config) error {
@@ -283,12 +284,12 @@ func (c *ConfigManager) saveConfig(configPath string, entry *configpb.ConfigEntr
 	if !resp.Succeeded {
 		return errors.New("save config failed, maybe we lost leader")
 	}
-
 	return nil
+	//return c.baseKV.Save("tikv", string(data))
 }
 
 func (c *ConfigManager) getTikvConfigList() ([]*configpb.ConfigEntry,error) {
-	kvResp,err := kv.NewEtcdKVBase(c.client, c.rootPath).Load("tikv")
+	kvResp,err := c.baseKV.Load("tikv")
 	if err != nil {
 		return nil,err
 	}
