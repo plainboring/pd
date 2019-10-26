@@ -29,6 +29,7 @@ import (
 	"github.com/coreos/go-semver/semver"
 	"github.com/golang/protobuf/proto"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/configpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -78,6 +79,8 @@ type Server struct {
 	serverLoopCtx    context.Context
 	serverLoopCancel func()
 	serverLoopWg     sync.WaitGroup
+	// for config manager
+	configManager *config.ConfigManager
 
 	member    *member.Member
 	client    *clientv3.Client
@@ -126,7 +129,10 @@ func CreateServer(cfg *config.Config, apiRegister func(*Server) http.Handler) (*
 			pdAPIPrefix: apiRegister(s),
 		}
 	}
-	etcdCfg.ServiceRegister = func(gs *grpc.Server) { pdpb.RegisterPDServer(gs, s) }
+	etcdCfg.ServiceRegister = func(gs *grpc.Server) {
+		pdpb.RegisterPDServer(gs, s)
+		configpb.RegisterConfigServer(gs, s)
+	}
 	s.etcdCfg = etcdCfg
 	if EnableZap {
 		// The etcd master version has removed embed.Config.SetupLogging.
@@ -222,6 +228,7 @@ func (s *Server) startServer() error {
 
 	s.idAllocator = id.NewAllocatorImpl(s.client, s.rootPath, s.member.MemberValue())
 	s.tso = tso.NewTimestampOracle(s.client, s.rootPath, s.member.MemberValue(), s.cfg.TsoSaveInterval.Duration)
+	s.configManager = config.NewConfigManager(s.client, s.rootPath, s.member.MemberValue())
 	kvBase := kv.NewEtcdKVBase(s.client, s.rootPath)
 	path := filepath.Join(s.cfg.DataDir, "region-meta")
 	regionStorage, err := core.NewRegionStorage(path)
@@ -888,6 +895,8 @@ func (s *Server) campaignLeader() {
 		log.Error("failed to reload configuration", zap.Error(err))
 		return
 	}
+	s.configManager.InitConfigManager()
+
 	// Try to create raft cluster.
 	err = s.createRaftCluster()
 	if err != nil {
@@ -954,6 +963,7 @@ func (s *Server) reloadConfigFromKV() error {
 	if err != nil {
 		return err
 	}
+
 	if s.scheduleOpt.LoadPDServerConfig().UseRegionStorage {
 		s.storage.SwitchToRegionStorage()
 		log.Info("server enable region storage")
