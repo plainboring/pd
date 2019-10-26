@@ -131,3 +131,23 @@ func TestTikvWorkLoad(t *testing.T) {
 		t.Fatal(newCfg1.Raftstore.RaftLogGCCountLimit)
 	}
 }
+
+func TestNewTikvUpdate(t *testing.T)  {
+	manager := ConfigManager{
+		tikvConfigs: make(map[uint64]*tikvConfig),
+		baseKV: kv.NewMemoryKV(),
+	}
+	var store_id uint64 = 1
+	initConfig := cfgclient.Config{}
+	initConfig.Raftstore.RaftLogGCCountLimit = 10
+	buf := bytes.NewBuffer([]byte{})
+	if err := toml.NewEncoder(buf).Encode(initConfig); err != nil {
+		t.Fatal(err)
+	}
+
+	manager.NewTikvConfigReport(store_id, buf.String())
+	cfg := manager.GetLatestTikvConfig(store_id)
+	if cfg.Raftstore.RaftLogGCCountLimit != 10 {
+		t.Fatal(cfg.Raftstore.RaftLogGCCountLimit)
+	}
+}
