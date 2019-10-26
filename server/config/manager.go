@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/BurntSushi/toml"
 	"github.com/pingcap/kvproto/pkg/configpb"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/server/kv"
 	"github.com/pkg/errors"
 	cfgclient "github.com/plainboring/config_client/pkg/tikv"
@@ -125,18 +126,18 @@ func (c *ConfigManager) UpdatePDConfig(entry *configpb.ConfigEntry, cfg *Config)
 	defer c.mu.Unlock()
 
 	var err error
-	buf := []byte{}
-	if err := toml.NewEncoder(bytes.NewBuffer(buf)).Encode(map[string]string{entry.Name:entry.Value}); err != nil {
+	buf := bytes.NewBuffer([]byte{})
+	if err := toml.NewEncoder(buf).Encode(map[string]string{entry.Name:entry.Value}); err != nil {
 		panic(err)
 	}
 
 	switch entry.Subsystem[0] {
 	case "schedule":
-		_,err = toml.Decode(string(buf), &cfg.Schedule)
+		DecodeIntoConfigSchedule(entry, cfg)
 	case "replication":
-		_,err = toml.Decode(string(buf), &cfg.Replication)
+		DecodeIntoConfigReplication(entry, cfg)
 	case "pd-server":
-		_,err = toml.Decode(string(buf), &cfg.PDServerCfg)
+		DecodeIntoConfigPDServer(entry,cfg)
 	default:
 		return errors.New("unkown subsystem")
 	}
@@ -144,6 +145,143 @@ func (c *ConfigManager) UpdatePDConfig(entry *configpb.ConfigEntry, cfg *Config)
 	return err
 }
 
+func DecodeIntoConfigSchedule(entry *configpb.ConfigEntry, cfg *Config)  {
+	uint64_value,uint64_err := strconv.ParseUint(entry.Value, 10, 64)
+	float64_value,float64_err := strconv.ParseFloat(entry.Value, 64)
+	bool_value,bool_err := strconv.ParseBool(entry.Value)
+
+	switch entry.Name {
+	//uint64
+	case "max-snapshot-count" :
+		if uint64_err == nil {
+			cfg.Schedule.MaxSnapshotCount = uint64_value
+		}
+	case "max-pending-peer-count":
+		if uint64_err == nil {
+			cfg.Schedule.MaxPendingPeerCount = uint64_value
+		}
+	case "max-merge-region-size":
+		if uint64_err == nil {
+			cfg.Schedule.MaxMergeRegionSize = uint64_value
+		}
+	case "max-merge-region-keys":
+		if uint64_err == nil {
+			cfg.Schedule.MaxMergeRegionKeys = uint64_value
+		}
+	case "leader-schedule-limit":
+		if uint64_err == nil {
+			cfg.Schedule.LeaderScheduleLimit = uint64_value
+		}
+	case "region-schedule-limit":
+		if uint64_err == nil {
+			cfg.Schedule.RegionScheduleLimit = uint64_value
+		}
+	case "replica-schedule-limit":
+		if uint64_err == nil {
+			cfg.Schedule.ReplicaScheduleLimit = uint64_value
+		}
+	case "merge-schedule-limit":
+		if uint64_err == nil {
+			cfg.Schedule.MergeScheduleLimit = uint64_value
+		}
+	case "hot-region-schedule-limit":
+		if uint64_err == nil {
+			cfg.Schedule.HotRegionScheduleLimit = uint64_value
+		}
+	case "hot-region-cache-hits-threshol":
+		if uint64_err == nil {
+			cfg.Schedule.HotRegionCacheHitsThreshold = uint64_value
+		}
+	case "scheduler-max-waiting-operator":
+		if uint64_err == nil {
+			cfg.Schedule.SchedulerMaxWaitingOperator = uint64_value
+		}
+	//float64
+	case "store-balance-rate":
+		if float64_err == nil {
+			cfg.Schedule.StoreBalanceRate = float64_value
+		}
+	case "tolerant-size-ratio":
+		if float64_err == nil {
+			cfg.Schedule.TolerantSizeRatio = float64_value
+		}
+	case "low-space-ratio":
+		if float64_err == nil {
+			cfg.Schedule.LowSpaceRatio = float64_value
+		}
+	case "high-space-ratio":
+		if float64_err == nil {
+			cfg.Schedule.HighSpaceRatio = float64_value
+		}
+	//bool
+	case "enable-one-way-merge":
+		if bool_err == nil {
+			cfg.Schedule.EnableOneWayMerge = bool_value
+		}
+	case "disable-raft-learner":
+		if bool_err == nil {
+			cfg.Schedule.DisableLearner = bool_value
+		}
+	case "disable-remove-down-replica":
+		if bool_err == nil {
+			cfg.Schedule.DisableRemoveDownReplica = bool_value
+		}
+	case "disable-replace-offline-replica":
+		if bool_err == nil {
+			cfg.Schedule.DisableReplaceOfflineReplica = bool_value
+		}
+	case "disable-make-up-replica":
+		if bool_err == nil {
+			cfg.Schedule.DisableMakeUpReplica = bool_value
+		}
+	case "disable-remove-extra-replica":
+		if bool_err == nil {
+			cfg.Schedule.DisableRemoveExtraReplica = bool_value
+		}
+	case "disable-location-replacement":
+		if bool_err == nil {
+			cfg.Schedule.DisableLocationReplacement = bool_value
+		}
+	case "disable-namespace-relocation":
+		if bool_err == nil {
+			cfg.Schedule.DisableNamespaceRelocation = bool_value
+		}
+	//other
+	default:
+		buf := bytes.NewBuffer([]byte{})
+		if err := toml.NewEncoder(buf).Encode(map[string]string{entry.Name:entry.Value}); err != nil {
+			log.Error(err.Error())
+		}
+		if _,err := toml.Decode(buf.String(), &cfg.Schedule); err != nil {
+			log.Error(err.Error())
+		}
+	}
+}
+
+func DecodeIntoConfigReplication(entry *configpb.ConfigEntry, cfg *Config)  {
+	switch entry.Name {
+	case "max-replicas":
+		uint64_value,uint64_err := strconv.ParseUint(entry.Value, 10, 64)
+		if uint64_err == nil {
+			cfg.Replication.MaxReplicas = uint64_value
+		}
+	case "strictly-match-label":
+		bool_value,bool_err := strconv.ParseBool(entry.Value)
+		if bool_err != nil {
+			cfg.Replication.StrictlyMatchLabel = bool_value
+		}
+	}
+}
+
+func DecodeIntoConfigPDServer(entry *configpb.ConfigEntry, cfg *Config)  {
+	switch entry.Name {
+	case "use-region-storage":
+		bool_value,bool_err := strconv.ParseBool(entry.Value)
+		if bool_err != nil {
+			cfg.PDServerCfg.UseRegionStorage = bool_value
+		}
+	}
+}
 
 func (c *ConfigManager) UpdateTikvConfig(entry *configpb.ConfigEntry) error {
 	c.mu.Lock()
