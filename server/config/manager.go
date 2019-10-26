@@ -85,7 +85,7 @@ func (c *ConfigManager) NewTikvConfigReport(store_id uint64, config string)  {
 }
 
 func (c *ConfigManager) GetLatestTikvConfig(store_id uint64) *cfgclient.Config {
-	configPath := path.Join(c.rootPath, "tikv", strconv.FormatUint(store_id, 10))
+	configPath := path.Join("tikv", strconv.FormatUint(store_id, 10))
 	cfg,err := c.baseKV.Load(configPath)
 	if err != nil || cfg == "" {
 		return nil
@@ -125,7 +125,7 @@ func (c *ConfigManager) ApplyNewConfigForTikv(store_id uint64, entry  *configpb.
 }
 
 func (c *ConfigManager) SaveTikvConfigIfNotExist(store_id uint64, config string) error {
-	configPath := path.Join(c.rootPath, "tikv", strconv.FormatUint(store_id, 10))
+	configPath := path.Join("tikv", strconv.FormatUint(store_id, 10))
 	cfg,err := c.baseKV.Load(configPath)
 	if err != nil {
 		return err
@@ -138,20 +138,21 @@ func (c *ConfigManager) SaveTikvConfigIfNotExist(store_id uint64, config string)
 }
 
 func (c *ConfigManager) SaveTikvConfig(store_id uint64, config string) error {
-	leaderPath := path.Join(c.rootPath, "leader")
-	txn := kv.NewSlowLogTxn(c.client).If(append([]clientv3.Cmp{}, clientv3.Compare(clientv3.Value(leaderPath), "=", c.member))...)
-
-	configPath := path.Join(c.rootPath, "tikv", strconv.FormatUint(store_id, 10))
-	resp, err := txn.Then(clientv3.OpPut(configPath, config)).Commit()
-	if err != nil {
-		return errors.WithStack(err)
-	}
-
-	if !resp.Succeeded {
-		return errors.New("save config failed, maybe we lost leader")
-	}
-	//return c.baseKV.Save(configPath, config)
-	return nil
+	//leaderPath := path.Join(c.rootPath, "leader")
+	//txn := kv.NewSlowLogTxn(c.client).If(append([]clientv3.Cmp{}, clientv3.Compare(clientv3.Value(leaderPath), "=", c.member))...)
+	//
+	//configPath := path.Join(c.rootPath, "tikv", strconv.FormatUint(store_id, 10))
+	//resp, err := txn.Then(clientv3.OpPut(configPath, config)).Commit()
+	//if err != nil {
+	//	return errors.WithStack(err)
+	//}
+	//
+	//if !resp.Succeeded {
+	//	return errors.New("save config failed, maybe we lost leader")
+	//}
+	configPath := path.Join("tikv", strconv.FormatUint(store_id, 10))
+	return c.baseKV.Save(configPath, config)
+	//return nil
 }
 
 func (c *ConfigManager) GetTikvEntries(store_id uint64) []*configpb.ConfigEntry {
