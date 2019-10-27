@@ -797,15 +797,6 @@ func (s *Server) Get(ctx context.Context, request *configpb.GetRequest) (*config
 	if s.IsClosed() || !s.member.IsLeader() {
 		return nil, errors.WithStack(notLeaderError)
 	}
-	//header := request.GetHeader()
-	//if header.GetClusterId() != s.clusterID {
-	//	return nil, status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, header.GetClusterId())
-	//}
-
-	//cluster := s.GetRaftCluster()
-	//if cluster == nil {
-	//	return &configpb.GetResponse{Header: &configpb.ResponseHeader{Error: &configpb.Error{Type: configpb.Error_FAILED, Message: "cluster is not bootstrapped"}}}, nil
-	//}
 
 	var err error
 	var c string
@@ -851,15 +842,6 @@ func (s *Server) Update(ctx context.Context, request *configpb.UpdateRequest) (*
 	if s.IsClosed() || !s.member.IsLeader() {
 		return nil, errors.WithStack(notLeaderError)
 	}
-	//header := request.GetHeader()
-	//if header.GetClusterId() != s.clusterID {
-	//	return nil, status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, header.GetClusterId())
-	//}
-
-	//cluster := s.GetRaftCluster()
-	//if cluster == nil {
-	//	return &configpb.UpdateResponse{Header: &configpb.ResponseHeader{Error: &configpb.Error{Type: configpb.Error_FAILED, Message: "cluster is not bootstrapped"}}}, nil
-	//}
 
 	var err error
 
