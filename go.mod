@@ -26,7 +26,7 @@ require (
 	github.com/pingcap/kvproto v0.0.0-20191023083849-24285ce8b84a
 	github.com/pingcap/log v0.0.0-20190715063458-479153f07ebd
 	github.com/pkg/errors v0.8.1
-	github.com/plainboring/config_client v0.0.0-20191026124256-e7cccd991700
+	github.com/plainboring/config_client v0.0.0-20191027020705-967247d04a3b
 	github.com/prometheus/client_golang v0.8.0
 	github.com/sirupsen/logrus v1.0.5
 	github.com/spf13/cobra v0.0.5
